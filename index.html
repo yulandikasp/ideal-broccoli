@@ -1,48 +1,360 @@
-<!-- Dashboard dari Google Sheets dengan Data Dummy -->
+<!--
+Dashboard dari Google Sheets (Satu file HTML)
+-------------------------------------------
+Cara pakai singkat:
+1. Di Google Sheets: File -> Share -> Publish to the web -> pilih sheet -> format CSV -> Publish.
+   Salin URL CSV, misalnya:
+   https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?output=csv
+
+2. Buka file HTML ini, cari variabel GOOGLE_SHEET_CSV_URL di bagian <script> dan ganti dengan URL CSV Anda.
+
+3. Simpan file sebagai index.html dan host di GitHub Pages / Netlify atau buka langsung di browser (beberapa browser membatasi fetch file://).
+
+Fitur yang termasuk:
+- Otomatis mendeteksi kolom tanggal dan kolom numerik
+- Membuat beberapa grafik sekaligus (Line, Bar, Stacked Bar, Pie, Doughnut, Radar)
+- Ringkasan metrik: total, rata-rata, terakhir, prosentase capai target
+- Filter rentang tanggal, tombol refresh
+- Mudah dikustomisasi: ubah/format CSS, tambah/matikan chart di bagian scripts
+
+Format spreadsheet contoh (baris pertama header):
+Tanggal,Target,Progress,Sales,Users
+2025-08-01,100,80,1200,30
+2025-08-02,100,90,1500,40
+...
+
+Catatan keamanan & privasi:
+- Jika spreadsheet berisi data sensitif, jangan publish sebagai public. Alternatif: gunakan server proxy yang aman atau Google Sheets API dengan OAuth.
+- Versi ini mengandalkan CSV publik (publish to web) untuk kemudahan penggunaan gratis.
+
+-->
+
 <!doctype html>
 <html lang="id">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Dashboard Demo — Data Dummy</title>
-  <style>body{font-family:sans-serif;margin:0;background:#f4f6fb}canvas{max-width:100%}</style>
+  <title>Dashboard dari Google Sheets — Contoh</title>
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+  <style>
+    :root{--bg:#f4f6fb;--card:#fff;--accent:#2b6df6;--muted:#6b7280}
+    body{font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; margin:0; background:var(--bg); color:#0f172a}
+    .top{display:flex;gap:16px;align-items:center;padding:18px 24px}
+    .title{font-size:20px;font-weight:700}
+    .subtitle{color:var(--muted);font-size:13px}
+    .container{padding:16px 24px}
+    .grid{display:grid;grid-template-columns:repeat(12,1fr);gap:16px}
+    .card{background:var(--card);border-radius:12px;padding:12px;box-shadow:0 6px 18px rgba(15,23,42,0.06)}
+    .span-3{grid-column:span 3}
+    .span-6{grid-column:span 6}
+    .span-12{grid-column:span 12}
+    .metrics{display:flex;gap:12px}
+    .metric{flex:1;padding:12px;border-radius:10px;background:linear-gradient(180deg,#fff,#fbfdff)}
+    .metric .k{font-size:18px;font-weight:700}
+    .metric .l{color:var(--muted);font-size:12px}
+    canvas{max-width:100%;height:280px}
+    .controls{display:flex;gap:8px;align-items:center}
+    select,input[type=date]{padding:8px;border-radius:8px;border:1px solid #e6edf8}
+    button{background:var(--accent);color:white;padding:8px 12px;border-radius:8px;border:none;cursor:pointer}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:13px}
+    .muted{color:var(--muted)}
+    footer{padding:14px;text-align:center;color:var(--muted);font-size:13px}
+    @media(max-width:900px){.span-3{grid-column:span 6}.span-6{grid-column:span 12}.container{padding:12px}}
+  </style>
 </head>
 <body>
-  <h1 style="text-align:center;padding:10px">Dashboard Demo — Data Dummy</h1>
-  <canvas id="lineChart"></canvas>
-  <canvas id="barChart"></canvas>
-  <canvas id="pieChart"></canvas>
+  <div class="top">
+    <div>
+      <div class="title">Dashboard Progress — Dari Google Sheets</div>
+      <div class="subtitle">Interaktif • Gratis • Gampang dikustom</div>
+    </div>
+    <div style="margin-left:auto" class="controls">
+      <label class="muted">Dari</label>
+      <input id="fromDate" type="date">
+      <label class="muted">Sampai</label>
+      <input id="toDate" type="date">
+      <button id="applyFilter">Apply</button>
+      <button id="refreshBtn" title="Refresh data">Refresh</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="grid">
+      <div class="card span-12">
+        <div style="display:flex;justify-content:space-between;align-items:center"><strong>Ringkasan</strong><span class="muted"> otomatis dari data</span></div>
+        <div class="metrics" style="margin-top:12px">
+          <div class="metric">
+            <div class="k" id="metric-latest">-</div>
+            <div class="l">Nilai terakhir (Progress)</div>
+          </div>
+          <div class="metric">
+            <div class="k" id="metric-average">-</div>
+            <div class="l">Rata-rata (Progress)</div>
+          </div>
+          <div class="metric">
+            <div class="k" id="metric-total">-</div>
+            <div class="l">Total (sum semua Progress)</div>
+          </div>
+          <div class="metric">
+            <div class="k" id="metric-targetPct">-</div>
+            <div class="l">Rata2 % capai target</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card span-6">
+        <strong>Line Chart — Progress</strong>
+        <canvas id="lineChart"></canvas>
+      </div>
+
+      <div class="card span-6">
+        <strong>Bar Chart — Target vs Progress</strong>
+        <canvas id="barChart"></canvas>
+      </div>
+
+      <div class="card span-6">
+        <strong>Stacked Bar — Beberapa metrik</strong>
+        <canvas id="stackedChart"></canvas>
+      </div>
+
+      <div class="card span-3">
+        <strong>Pie — Komposisi metrik terakhir</strong>
+        <canvas id="pieChart"></canvas>
+      </div>
+
+      <div class="card span-3">
+        <strong>Doughnut — Persentase (terakhir)</strong>
+        <canvas id="doughnutChart"></canvas>
+      </div>
+
+      <div class="card span-6">
+        <strong>Radar — Perbandingan metrik (terakhir)</strong>
+        <canvas id="radarChart"></canvas>
+      </div>
+
+      <div class="card span-12">
+        <strong>Data Table</strong>
+        <div style="overflow:auto;max-height:300px;margin-top:8px">
+          <table id="dataTable"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer>Template gratis — Ganti variabel GOOGLE_SHEET_CSV_URL di bagian script dengan link CSV Anda</footer>
 
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    // Contoh data dummy
-    const labels = ['2025-08-01','2025-08-02','2025-08-03','2025-08-04'];
-    const target = [100, 100, 100, 100];
-    const progress = [80, 90, 95, 100];
-    const sales = [1200, 1500, 1400, 1600];
+    // === UBAH INI DENGAN LINK CSV PUBLIK GOOGLE SHEETS ANDA ===
+    const GOOGLE_SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSWCkd_KYVxdPoZ_5d4df-tqUTLFsiD2V5KWg8b68KqaVKhZLVXVkSOyHktPGzJpH6wfE_8kfDTJRlF/pub?output=csv";
+    // ========================================================
 
-    // Line Chart
-    new Chart(document.getElementById('lineChart'), {
-      type: 'line',
-      data: { labels, datasets: [{label: 'Progress', data: progress, borderColor: 'blue', fill: false}]},
-      options: { responsive: true }
+    // Utility: parse CSV (simple)
+    function parseCSV(text){
+      const lines = text.trim().split(/\r?\n/).filter(l=>l.trim().length>0);
+      const headers = lines.shift().split(',').map(h=>h.trim());
+      const rows = lines.map(line=>{
+        // split respecting quoted commas
+        const values = line.match(/(?:"([^"]*)")|([^,]+)/g).map(v=>v.replace(/^"|"$/g,'').trim());
+        const obj = {};
+        headers.forEach((h,i)=>obj[h]=values[i]===undefined?"":values[i]);
+        return obj;
+      });
+      return {headers, rows};
+    }
+
+    // Detect date column (simple heuristics)
+    function findDateColumn(headers, rows){
+      for(const h of headers){
+        const low=h.toLowerCase();
+        if(low.includes('date')||low.includes('tanggal')||low.includes('tgl')) return h;
+      }
+      // fallback: try to parse first column values
+      const first=rows[0];
+      if(!first) return null;
+      const candidate=headers[0];
+      const ok = rows.slice(0,10).every(r=>Date.parse(r[candidate]));
+      return ok?candidate:null;
+    }
+
+    // Detect numeric columns
+    function findNumericColumns(headers, rows){
+      const numeric=[];
+      for(const h of headers){
+        const vals = rows.map(r=>r[h]).filter(v=>v!==undefined && v!=='');
+        if(vals.length===0) continue;
+        const allNumeric = vals.every(v=>{ const n = parseFloat(v.toString().replace(/,/g,'')); return !isNaN(n); });
+        if(allNumeric) numeric.push(h);
+      }
+      return numeric;
+    }
+
+    // Fetch and build
+    async function loadAndBuild(url){
+      if(!url || url.includes('REPLACE_WITH_YOUR_CSV_URL')){
+        alert('Silakan edit file HTML dan ganti variabel GOOGLE_SHEET_CSV_URL dengan link CSV publik Google Sheets Anda.');
+        return;
+      }
+      try{
+        const res = await fetch(url);
+        if(!res.ok) throw new Error('Gagal fetch CSV: '+res.status);
+        const text = await res.text();
+        const {headers, rows} = parseCSV(text);
+
+        const dateCol = findDateColumn(headers, rows);
+        const numericCols = findNumericColumns(headers, rows);
+
+        // parse rows to usable form
+        const data = rows.map(r=>{
+          const out={};
+          if(dateCol) out._date = new Date(r[dateCol]);
+          headers.forEach(h=>{
+            const raw = r[h];
+            const num = parseFloat((raw||'').toString().replace(/,/g,''));
+            out[h] = isNaN(num) ? raw : num;
+          });
+          return out;
+        }).filter(d=>!dateCol || !isNaN(d._date));
+
+        // sort by date
+        if(dateCol) data.sort((a,b)=>a._date - b._date);
+
+        buildTable(headers, data);
+        buildSummary(numericCols, data, headers);
+        buildCharts(dateCol, numericCols, data, headers);
+      }catch(err){
+        console.error(err); alert('Error: '+err.message)
+      }
+    }
+
+    function buildTable(headers, data){
+      const th = document.getElementById('tableHead');
+      const tb = document.getElementById('tableBody');
+      th.innerHTML = '<tr>'+headers.map(h=>`<th>${h}</th>`).join('')+'</tr>';
+      tb.innerHTML = data.map(r=>'<tr>'+headers.map(h=>`<td>${(r[h]!==undefined && r[h]!==null)?r[h]:''}</td>`).join('')+'</tr>').join('');
+    }
+
+    function buildSummary(numericCols, data, headers){
+      // prefer Progress column
+      const prefer = numericCols.find(c=>c.toLowerCase().includes('progress')) || numericCols[0];
+      const targetCol = numericCols.find(c=>c.toLowerCase().includes('target')) || null;
+      if(!prefer){
+        document.getElementById('metric-latest').innerText='-';
+        document.getElementById('metric-average').innerText='-';
+        document.getElementById('metric-total').innerText='-';
+        document.getElementById('metric-targetPct').innerText='-';
+        return;
+      }
+      const values = data.map(d=>d[prefer]).filter(v=>typeof v==='number');
+      const latest = values[values.length-1]||0;
+      const sum = values.reduce((a,b)=>a+b,0);
+      const avg = values.length? (sum/values.length):0;
+      document.getElementById('metric-latest').innerText = latest;
+      document.getElementById('metric-average').innerText = avg.toFixed(2);
+      document.getElementById('metric-total').innerText = sum.toFixed(2);
+
+      if(targetCol){
+        const pctArr = data.map(d=> (d[targetCol] && d[prefer])? (d[prefer]/d[targetCol])*100 : null).filter(v=>v!==null);
+        const avgPct = pctArr.length ? (pctArr.reduce((a,b)=>a+b,0)/pctArr.length) : 0;
+        document.getElementById('metric-targetPct').innerText = avgPct.toFixed(1)+'%';
+      }else{
+        document.getElementById('metric-targetPct').innerText = 'N/A';
+      }
+    }
+
+    // Chart instances
+    let charts = [];
+    function clearCharts(){ charts.forEach(c=>c.destroy()); charts = []; }
+
+    function buildCharts(dateCol, numericCols, data, headers){
+      clearCharts();
+      const labels = dateCol ? data.map(d=> d._date.toISOString().slice(0,10)) : data.map((_,i)=>i+1);
+
+      // Prepare datasets for numeric columns
+      const datasets = numericCols.map((col, idx)=>({
+        label: col,
+        data: data.map(d=>d[col]),
+        // backgroundColor and borderColor left to Chart.js default palette
+        borderWidth:1,
+      }));
+
+      // Line chart (show up to first 3 numeric columns stacked)
+      const ctxLine = document.getElementById('lineChart');
+      const lineChart = new Chart(ctxLine, {
+        type:'line',
+        data:{labels, datasets: datasets.map(ds=>({...ds, fill:false}))},
+        options:{responsive:true, interaction:{mode:'index', intersect:false}, plugins:{legend:{position:'top'}}}
+      }); charts.push(lineChart);
+
+      // Bar chart: compare first numeric (progress) vs target (if exists)
+      const targetCol = numericCols.find(c=>c.toLowerCase().includes('target')) || null;
+      const progressCol = numericCols.find(c=>c.toLowerCase().includes('progress')) || numericCols[0];
+      const ctxBar = document.getElementById('barChart');
+      const barDatasets = [];
+      if(progressCol) barDatasets.push({label:progressCol,data:data.map(d=>d[progressCol]), borderWidth:1});
+      if(targetCol) barDatasets.push({label:targetCol,data:data.map(d=>d[targetCol]), borderWidth:1});
+      const barChart = new Chart(ctxBar,{type:'bar',data:{labels, datasets:barDatasets}, options:{responsive:true, plugins:{legend:{position:'top'}}}});
+      charts.push(barChart);
+
+      // Stacked bar: take up to 4 numeric columns
+      const stackedCols = numericCols.slice(0,4);
+      const stackedDatasets = stackedCols.map(c=>({label:c, data:data.map(d=>d[c]), stack:'stack1', borderWidth:1}));
+      const ctxStack = document.getElementById('stackedChart');
+      const stackedChart = new Chart(ctxStack,{type:'bar',data:{labels, datasets:stackedDatasets}, options:{responsive:true, plugins:{legend:{position:'top'}}, scales:{x:{stacked:true}, y:{stacked:true}}}});
+      charts.push(stackedChart);
+
+      // Pie & Doughnut & Radar based on last row composition
+      const last = data[data.length-1] || {};
+      const pieCols = numericCols.slice(0,5);
+      const pieLabels = pieCols;
+      const pieData = pieCols.map(c=> last[c] || 0);
+
+      const ctxPie = document.getElementById('pieChart');
+      const pieChart = new Chart(ctxPie,{type:'pie',data:{labels:pieLabels, datasets:[{data:pieData}]}, options:{responsive:true}});
+      charts.push(pieChart);
+
+      const ctxDough = document.getElementById('doughnutChart');
+      const doughChart = new Chart(ctxDough,{type:'doughnut',data:{labels:pieLabels, datasets:[{data:pieData}]}, options:{responsive:true}});
+      charts.push(doughChart);
+
+      const ctxRadar = document.getElementById('radarChart');
+      const radarChart = new Chart(ctxRadar,{type:'radar',data:{labels:pieLabels, datasets:[{label:'Terakhir', data:pieData, borderWidth:1}]}, options:{responsive:true, scales:{r:{beginAtZero:true}}}});
+      charts.push(radarChart);
+
+    }
+
+    // Event handlers for filter
+    document.getElementById('applyFilter').addEventListener('click',()=>{
+      const from = document.getElementById('fromDate').value;
+      const to = document.getElementById('toDate').value;
+      if(!from && !to){ alert('Pilih tanggal dari/sampai untuk filter.'); return; }
+      // fetch original CSV then filter client-side
+      fetch(GOOGLE_SHEET_CSV_URL).then(r=>r.text()).then(txt=>{
+        const {headers, rows} = parseCSV(txt);
+        const dateCol = findDateColumn(headers, rows);
+        if(!dateCol){ alert('Tidak menemukan kolom tanggal di dataset.'); return; }
+        const parsed = rows.map(r=>({...r, _date: new Date(r[dateCol])}));
+        const fromD = from? new Date(from): new Date(-8640000000000000);
+        const toD = to? new Date(to): new Date(8640000000000000);
+        const filtered = parsed.filter(r=> r._date >= fromD && r._date <= toD);
+        const numericCols = findNumericColumns(headers, filtered);
+        // reuse builders
+        buildTable(headers, filtered);
+        buildSummary(numericCols, filtered, headers);
+        buildCharts(dateCol, numericCols, filtered, headers);
+      }).catch(e=>{ console.error(e); alert('Error saat filter: '+e.message) });
     });
 
-    // Bar Chart
-    new Chart(document.getElementById('barChart'), {
-      type: 'bar',
-      data: { labels, datasets: [
-        {label: 'Target', data: target, backgroundColor: 'rgba(0, 123, 255, 0.5)'},
-        {label: 'Progress', data: progress, backgroundColor: 'rgba(40, 167, 69, 0.5)'}
-      ]},
-      options: { responsive: true }
+    document.getElementById('refreshBtn').addEventListener('click',()=>{
+      loadAndBuild(GOOGLE_SHEET_CSV_URL);
     });
 
-    // Pie Chart
-    new Chart(document.getElementById('pieChart'), {
-      type: 'pie',
-      data: { labels: ['Target','Progress','Sales'], datasets: [{ data: [target[3], progress[3], sales[3]], backgroundColor: ['red','green','orange']}]},
-      options: { responsive: true }
+    // Auto-load on open
+    window.addEventListener('load',()=>{
+      // initial load
+      loadAndBuild(GOOGLE_SHEET_CSV_URL);
     });
   </script>
 </body>

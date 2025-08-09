@@ -1,0 +1,49 @@
+<!-- Dashboard dari Google Sheets dengan Data Dummy -->
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Dashboard Demo — Data Dummy</title>
+  <style>body{font-family:sans-serif;margin:0;background:#f4f6fb}canvas{max-width:100%}</style>
+</head>
+<body>
+  <h1 style="text-align:center;padding:10px">Dashboard Demo — Data Dummy</h1>
+  <canvas id="lineChart"></canvas>
+  <canvas id="barChart"></canvas>
+  <canvas id="pieChart"></canvas>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    // Contoh data dummy
+    const labels = ['2025-08-01','2025-08-02','2025-08-03','2025-08-04'];
+    const target = [100, 100, 100, 100];
+    const progress = [80, 90, 95, 100];
+    const sales = [1200, 1500, 1400, 1600];
+
+    // Line Chart
+    new Chart(document.getElementById('lineChart'), {
+      type: 'line',
+      data: { labels, datasets: [{label: 'Progress', data: progress, borderColor: 'blue', fill: false}]},
+      options: { responsive: true }
+    });
+
+    // Bar Chart
+    new Chart(document.getElementById('barChart'), {
+      type: 'bar',
+      data: { labels, datasets: [
+        {label: 'Target', data: target, backgroundColor: 'rgba(0, 123, 255, 0.5)'},
+        {label: 'Progress', data: progress, backgroundColor: 'rgba(40, 167, 69, 0.5)'}
+      ]},
+      options: { responsive: true }
+    });
+
+    // Pie Chart
+    new Chart(document.getElementById('pieChart'), {
+      type: 'pie',
+      data: { labels: ['Target','Progress','Sales'], datasets: [{ data: [target[3], progress[3], sales[3]], backgroundColor: ['red','green','orange']}]},
+      options: { responsive: true }
+    });
+  </script>
+</body>
+</html>

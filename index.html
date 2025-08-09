@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Dashboard Ubinan — Chart.js + Google Sheets + GitHub Pages</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,'Noto Sans',sans-serif;margin:18px;background:#f7fafc;color:#0f172a}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    .card{background:white;border-radius:12px;padding:14px;box-shadow:0 6px 18px rgba(2,6,23,0.06)}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+    .controls > div{min-width:180px}
+    canvas{background:white;border-radius:8px;padding:8px}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
+    th,td{padding:6px;border-bottom:1px solid #e6eef6;text-align:left}
+    .small{font-size:0.9rem;color:#475569}
+    footer{margin-top:18px;font-size:0.85rem;color:#475569}
+    .summary{display:flex;gap:12px}
+    .summary .item{flex:1;padding:10px;border-radius:8px;background:#fff}
+    .filters{display:flex;gap:8px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Dashboard Ubinan</h1>
+    <div class="small">Sumber: Google Sheets (CSV) — Chart.js — Host: GitHub Pages</div>
+  </header>
+
+  <div class="card">
+    <div class="summary" id="summaryTop">
+      <div class="item">
+        <div class="small">Jumlah Baris (terfilter)</div>
+        <div id="totalRows" style="font-size:1.4rem;font-weight:600">-</div>
+      </div>
+      <div class="item">
+        <div class="small">% Bisa dilakukan ubinan</div>
+        <div id="pctBisa" style="font-size:1.4rem;font-weight:600">-</div>
+      </div>
+      <div class="item">
+        <div class="small">% Gagal panen/puso</div>
+        <div id="pctGagal" style="font-size:1.4rem;font-weight:600">-</div>
+      </div>
+      <div class="item">
+        <div class="small">% Lewat panen</div>
+        <div id="pctLewat" style="font-size:1.4rem;font-weight:600">-</div>
+      </div>
+      <div class="item">
+        <div class="small">Perkiraan panen paling sering</div>
+        <div id="topHarvest" style="font-size:1.05rem;font-weight:600">-</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card controls">
+    <div>
+      <label class="small">Komoditas:</label>
+      <select id="commodityFilter">
+        <option value="all">Padi & Palawija</option>
+        <option value="padi">Padi</option>
+        <option value="palawija">Palawija</option>
+      </select>
+    </div>
+    <div>
+      <label class="small">Bulan (multi):</label>
+      <select id="monthFilter" multiple size="4" style="min-width:200px">
+        <option value="Mei">Mei</option>
+        <option value="Juni">Juni</option>
+        <option value="Juli">Juli</option>
+        <option value="Agustus">Agustus</option>
+      </select>
+    </div>
+    <div>
+      <label class="small">Pilih sheet (multi):</label>
+      <select id="sheetSelect" multiple size="4" style="min-width:260px"></select>
+    </div>
+    <div style="margin-left:auto;display:flex;flex-direction:column;gap:6px">
+      <button id="loadBtn">Muat Data & Refresh</button>
+      <button id="selectAllBtn">Pilih Semua Sheet</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Bar chart per PPL</h3>
+      <canvas id="pplChart" height="260"></canvas>
+    </div>
+    <div class="card">
+      <h3>Bar chart per PML</h3>
+      <canvas id="pmlChart" height="260"></canvas>
+    </div>
+    <div class="card">
+      <h3>Pie: Proporsi Pengecekan Ubinan</h3>
+      <canvas id="pieChart" height="260"></canvas>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card" style="grid-column:1/4">
+      <h3>Line chart progress per bulan (kategori terpisah)</h3>
+      <canvas id="lineChart" height="120"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Data Tabel</h3>
+    <div id="tableContainer"></div>
+  </div>
+
+  <footer>
+    Catatan: sistem mencoba mencocokkan nama kolom umum seperti `PPL Ubinan`, `PML`, `Pengecekan Ubinan`, `Pengecekan Palawija`, `Perkiraan panen`.
+    Pastikan tiap sheet dipublish ke web sebagai CSV (gunakan `gid` masing-masing sheet). Anda telah memberikan gid — sistem sudah menggunakannya di konfigurasi.
+  </footer>
+
+<script>
+// ========== CONFIG: base published URL dan GID mapping ==========
+// Base URL (ambil bagian sebelum ?output=csv dari link publik Anda)
+const baseCsvUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSWCkd_KYVxdPoZ_5d4df-tqUTLFsiD2V5KWg8b68KqaVKhZLVXVkSOyHktPGzJpH6wfE_8kfDTJRlF/pub';
+const gids = [1153765034, 529738358, 1951480158, 895245660, 2108318717, 1446893873, 1370597324, 84564269];
+// assume order: Padi Mei, Padi Juni, Padi Juli, Padi Agustus, Palawija Mei, Palawija Juni, Palawija Juli, Palawija Agustus
+const sheetSources = [
+  {name:'Padi Mei',    gid:gids[0], type:'padi', month:'Mei'},
+  {name:'Padi Juni',   gid:gids[1], type:'padi', month:'Juni'},
+  {name:'Padi Juli',   gid:gids[2], type:'padi', month:'Juli'},
+  {name:'Padi Agustus',gid:gids[3], type:'padi', month:'Agustus'},
+  {name:'Palawija Mei',    gid:gids[4], type:'palawija', month:'Mei'},
+  {name:'Palawija Juni',   gid:gids[5], type:'palawija', month:'Juni'},
+  {name:'Palawija Juli',   gid:gids[6], type:'palawija', month:'Juli'},
+  {name:'Palawija Agustus',gid:gids[7], type:'palawija', month:'Agustus'}
+].map(s=> ({...s, url: `${baseCsvUrl}?gid=${s.gid}&output=csv`}));
+
+// ===== utilities =====
+function trimv(v){return (v||'').toString().trim();}
+function add(a,b){return (a||0)+(b||0)}
+
+async function fetchCSV(url){
+  return new Promise((resolve,reject)=>{
+    Papa.parse(url, {download:true, header:true, skipEmptyLines:true, complete:res=>resolve(res.data), error:err=>reject(err)});
+  })
+}
+
+// ===== rendering helpers & charts =====
+let charts = {};
+function destroyChart(c){ if(!c) return; try{ c.destroy(); }catch(e){} }
+
+function populateSheetSelect(){
+  const sel = document.getElementById('sheetSelect'); sel.innerHTML='';
+  sheetSources.forEach((s,i)=>{ const o=document.createElement('option'); o.value=String(i); o.textContent=`${s.name} — ${s.type} — ${s.month}`; sel.appendChild(o); });
+}
+
+function selectAllSheets(){ Array.from(document.getElementById('sheetSelect').options).forEach(o=>o.selected=true); }
+
+document.getElementById('selectAllBtn').addEventListener('click', ()=>{ selectAllSheets(); });
+
+// ===== main load & aggregations =====
+async function loadAndRender(){
+  const commodity = document.getElementById('commodityFilter').value;
+  const monthSel = Array.from(document.getElementById('monthFilter').selectedOptions).map(o=>o.value);
+  const chosen = Array.from(document.getElementById('sheetSelect').selectedOptions).map(o=>Number(o.value));
+
+  // decide which sheets to fetch
+  let sources = sheetSources.filter((s,i)=> chosen.length===0 || chosen.includes(i));
+  if(commodity!=='all') sources = sources.filter(s=>s.type===commodity);
+  if(monthSel.length>0) sources = sources.filter(s=> monthSel.includes(s.month));
+
+  // fetch
+  const allRows = [];
+  const perSheetRows = [];
+  for(const s of sources){
+    try{
+      const rows = await fetchCSV(s.url);
+      // normalize headers (trim)
+      const norm = rows.map(r=>{ const o={}; for(const k in r) o[k.trim()]=r[k]; // attach metadata
+        o.__sheet = s.name; o.__type=s.type; o.__month=s.month; return o; });
+      perSheetRows.push({sheet:s.name, rows:norm});
+      norm.forEach(r=> allRows.push(r));
+    }catch(err){ console.error('fetch error',s,err); }
+  }
+
+  renderSummary(allRows);
+  renderPPLChart(allRows);
+  renderPMLChart(allRows);
+  renderPieChart(allRows);
+  renderLineChartByMonth(perSheetRows);
+  renderTable(allRows);
+}
+
+function renderSummary(rows){
+  const total = rows.length;
+  document.getElementById('totalRows').textContent = total;
+  // determine column name for pengecekan ubinan: try multiple possibilities
+  const pengecekanKeys = ['Pengecekan Ubinan','Pengecekan Palawija','Pengecekan Ubinan ','Pengecekan Palawija '];
+  // find actual key
+  let key = null; if(rows.length>0){ const r = rows[0]; for(const k of Object.keys(r)){ if(['Pengecekan Ubinan','Pengecekan Palawija','Pengecekan Ubinan','Pengecekan Palawija'].map(x=>x.toLowerCase()).includes(k.toLowerCase())){ key=k; break; } } }
+  if(!key){ // try to find column containing 'pengecekan' text
+    for(const k of rows.length>0?Object.keys(rows[0]):[]){ if(k.toLowerCase().includes('pengecekan')){ key=k; break; } }
+  }
+  // count categories
+  const counts = {'Bisa dilakukan ubinan':0,'Gagal panen/puso':0,'Lewat panen':0,'(blank)':0, '(lainnya)':0};
+  if(key){
+    for(const r of rows){ const v=trimv(r[key]); if(v==='') counts['(blank)']++; else if(v in counts) counts[v]++; else counts['(lainnya)']++; }
+  }
+  const pct = v=> total===0? '0%': Math.round(100*(v/total))+'%';
+  document.getElementById('pctBisa').textContent = pct(counts['Bisa dilakukan ubinan']);
+  document.getElementById('pctGagal').textContent = pct(counts['Gagal panen/puso']);
+  document.getElementById('pctLewat').textContent = pct(counts['Lewat panen']);
+
+  // most common Perkiraan panen
+  const harvestKey = ['Perkiraan panen','Perkiraan Panen','Perkiraan panen '];
+  let hk = null; if(rows.length>0){ for(const k of Object.keys(rows[0])){ if(k.toLowerCase().includes('perkiraan')){ hk=k; break; } } }
+  const freq = {};
+  if(hk){ for(const r of rows){ const v = trimv(r[hk])||'(blank)'; freq[v] = (freq[v]||0)+1; } }
+  let top = '(tidak ada)'; let topCount=0;
+  for(const k in freq){ if(freq[k]>topCount){ topCount=freq[k]; top=k; } }
+  const topPct = total===0?0:Math.round(100*(topCount/total));
+  document.getElementById('topHarvest').textContent = `${top} — ${topCount} row (${topPct}%)`;
+}
+
+function categorizePengecekan(v){ const t=trimv(v).toLowerCase(); if(t.includes('bisa')) return 'Bisa dilakukan ubinan'; if(t.includes('gagal')||t.includes('puso')) return 'Gagal panen/puso'; if(t.includes('lewat')||t.includes('lewat panen')) return 'Lewat panen'; if(t==='') return '(blank)'; return '(lainnya)'; }
+
+function groupCountsBy(rows, keyName, pengecekanKeyCandidates){
+  const out = {}; // {groupVal: {category:count}}
+  for(const r of rows){
+    const groupVal = trimv(r[keyName])||'(blank)';
+    // find pengecekan value
+    let pk = null; for(const k of Object.keys(r)){ if(k.toLowerCase().includes('pengecekan')){ pk=k; break; } }
+    const raw = pk? r[pk] : '';
+    const cat = categorizePengecekan(raw);
+    out[groupVal] = out[groupVal]||{}; out[groupVal][cat] = (out[groupVal][cat]||0)+1;
+  }
+  return out;
+}
+
+function renderPPLChart(rows){
+  // group by possible PPL column names
+  const possiblePPL = ['PPL Ubinan','PPL','PPL Ubinan '];
+  let pllKey = null; if(rows.length>0){ for(const k of Object.keys(rows[0])){ if(k.toLowerCase().includes('ppl')){ pllKey=k; break; } } }
+  if(!pllKey){ document.getElementById('pplChart').getContext('2d').clearRect(0,0,600,400); return; }
+  const grouped = groupCountsBy(rows, pllKey);
+  const labels = Object.keys(grouped).sort();
+  const cats = ['Bisa dilakukan ubinan','Lewat panen','Gagal panen/puso','(blank)','(lainnya)'];
+  const datasets = cats.map((c,idx)=> ({ label:c, data: labels.map(l=> grouped[l][c]||0), stack:'s1' }));
+  const ctx = document.getElementById('pplChart'); destroyChart(charts.ppl); charts.ppl = new Chart(ctx,{ type:'bar', data:{labels, datasets}, options:{responsive:true, scales:{y:{beginAtZero:true}}} });
+}
+
+function renderPMLChart(rows){
+  // PML column may be named 'PML' or 'PML Ubinan'
+  let pmlKey = null; if(rows.length>0){ for(const k of Object.keys(rows[0])){ if(k.toLowerCase().includes('pml')){ pmlKey=k; break; } } }
+  if(!pmlKey){ document.getElementById('pmlChart').getContext('2d').clearRect(0,0,600,400); return; }
+  const grouped = groupCountsBy(rows, pmlKey);
+  const labels = Object.keys(grouped).sort();
+  const cats = ['Bisa dilakukan ubinan','Lewat panen','Gagal panen/puso','(blank)','(lainnya)'];
+  const datasets = cats.map((c,idx)=> ({ label:c, data: labels.map(l=> grouped[l][c]||0), stack:'s1' }));
+  const ctx = document.getElementById('pmlChart'); destroyChart(charts.pml); charts.pml = new Chart(ctx,{ type:'bar', data:{labels, datasets}, options:{responsive:true, scales:{y:{beginAtZero:true}}} });
+}
+
+function renderPieChart(rows){
+  // overall proportion of pengecekan categories
+  const counts = {'Bisa dilakukan ubinan':0,'Lewat panen':0,'Gagal panen/puso':0,'(blank)':0,'(lainnya)':0};
+  for(const r of rows){ let pk=null; for(const k of Object.keys(r)){ if(k.toLowerCase().includes('pengecekan')){ pk=k; break; } } const cat = categorizePengecekan(pk? r[pk]: ''); counts[cat] = (counts[cat]||0)+1; }
+  const labels = Object.keys(counts);
+  const data = labels.map(l=>counts[l]);
+  const ctx = document.getElementById('pieChart'); destroyChart(charts.pie); charts.pie = new Chart(ctx,{ type:'pie', data:{labels,data: data}, options:{responsive:true} });
+}
+
+function renderLineChartByMonth(perSheetRows){
+  // for each sheet (month) compute counts per category and show lines per category across months in order Mei,Juni,Juli,Agustus
+  const monthsOrder = ['Mei','Juni','Juli','Agustus'];
+  const cats = ['Bisa dilakukan ubinan','Lewat panen','Gagal panen/puso'];
+  const series = {};
+  cats.forEach(c=> series[c]=[]);
+  const labels = [];
+  for(const m of monthsOrder){
+    // find sheet(s) in perSheetRows with that month
+    const sheets = perSheetRows.filter(s=> s.sheet.toLowerCase().includes(m.toLowerCase()));
+    let merged = [];
+    sheets.forEach(s=> merged = merged.concat(s.rows));
+    labels.push(m);
+    const total = merged.length || 0;
+    const counts = {}; cats.forEach(c=> counts[c]=0);
+    for(const r of merged){ let pk=null; for(const k of Object.keys(r)){ if(k.toLowerCase().includes('pengecekan')){ pk=k; break; } } const cat = categorizePengecekan(pk? r[pk]: ''); if(cats.includes(cat)) counts[cat] = (counts[cat]||0)+1; }
+    cats.forEach(c=>{ // push percent (so line shows % per month)
+      const val = total===0?0: Math.round(100*(counts[c]/total)); series[c].push(val);
+    });
+  }
+  // build datasets
+  const datasets = cats.map(c=> ({label:c, data: series[c], fill:false, tension:0.3}));
+  const ctx = document.getElementById('lineChart'); destroyChart(charts.line); charts.line = new Chart(ctx,{ type:'line', data:{labels, datasets}, options:{responsive:true, scales:{y:{beginAtZero:true, max:100, title:{display:true,text:'% (per bulan)'}}}} });
+}
+
+function renderTable(rows){
+  const container = document.getElementById('tableContainer'); container.innerHTML='';
+  if(rows.length===0){ container.textContent='(tidak ada data)'; return; }
+  const keys = Object.keys(rows[0]).filter(k=> !k.startsWith('__'));
+  const tbl = document.createElement('table');
+  const htr = document.createElement('tr'); keys.forEach(k=>{ const th = document.createElement('th'); th.textContent=k; htr.appendChild(th); }); tbl.appendChild(htr);
+  rows.forEach(r=>{ const tr = document.createElement('tr'); keys.forEach(k=>{ const td = document.createElement('td'); td.textContent = r[k]||''; tr.appendChild(td); }); tbl.appendChild(tr); });
+  container.appendChild(tbl);
+}
+
+// init UI
+populateSheetSelect(); selectAllSheets();
+document.getElementById('loadBtn').addEventListener('click', ()=> loadAndRender());
+// initial load
+loadAndRender();
+</script>
+</body>
+</html>
